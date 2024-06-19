@@ -50,7 +50,7 @@ func (n *newbieManager) MemberRoleUpdateHandler(s *discordgo.Session, m *discord
 		}
 	}
 	// 新規会員ロールが手動付与された時
-	if m.BeforeUpdate != nil && slices.Contains(m.Roles, n.newbieRoleID) && (m.BeforeUpdate.Roles == nil || !slices.Contains(m.BeforeUpdate.Roles, n.newbieRoleID)) {
+	if slices.Contains(m.Roles, n.newbieRoleID) && (m.BeforeUpdate == nil || m.BeforeUpdate.Roles == nil || !slices.Contains(m.BeforeUpdate.Roles, n.newbieRoleID)) {
 		isNewbie, err := n.checkNewbie(s, m.Member)
 		if err == nil && !isNewbie {
 			// 条件にあてはまらない場合キャンセル
