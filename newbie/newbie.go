@@ -12,7 +12,7 @@ import (
 type NewbieManager interface {
 	// 会員ロール変化時に新規会員ロールを操作するハンドラ
 	MemberRoleUpdateHandler(s *discordgo.Session, m *discordgo.GuildMemberUpdate)
-	// 新規会員ロールを持っているメンバーから新規会員ロールを削除
+	// 新規会員ロールを更新
 	RefreshNewbieRoles(s *discordgo.Session)
 }
 
