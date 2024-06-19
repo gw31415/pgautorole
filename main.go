@@ -23,8 +23,8 @@ var (
 	MEMBER_ROLE_ID = os.Getenv("MEMBER_ROLE_ID")
 	// 新規会員のロールID
 	NEWBIE_ROLE_ID = os.Getenv("NEWBIE_ROLE_ID")
-	// 新規会員のロールをフィルターするスケジュール
-	NEWBIE_FILTERING_CRON = os.Getenv("NEWBIE_FILTERING_CRON")
+	// 新規会員のロールをリフレッシュするスケジュール
+	NEWBIE_REFRESHING_CRON = os.Getenv("NEWBIE_REFRESHING_CRON")
 	// 新規会員のロールの有効期間
 	NEWBIE_MAX_DURATION, _ = time.ParseDuration(os.Getenv("NEWBIE_MAX_DURATION"))
 )
@@ -36,7 +36,7 @@ func main() {
 	}
 
 	// 環境変数のチェック
-	if DISCORD_TOKEN == "" || MEMBER_ROLE_ID == "" || NEWBIE_ROLE_ID == "" || NEWBIE_FILTERING_CRON == "" || NEWBIE_MAX_DURATION == 0 {
+	if DISCORD_TOKEN == "" || MEMBER_ROLE_ID == "" || NEWBIE_ROLE_ID == "" || NEWBIE_REFRESHING_CRON == "" || NEWBIE_MAX_DURATION == 0 {
 		slog.Error("Please set environment variables")
 		return
 	}
@@ -56,7 +56,7 @@ func main() {
 	slog.Info("Setting up NewbieRoleManager", "MEMBER_ROLE_ID", MEMBER_ROLE_ID, "NEWBIE_ROLE_ID", NEWBIE_ROLE_ID, "NEWBIE_MAX_DURATION", NEWBIE_MAX_DURATION)
 	newbiemanager := newbie.NewNewbieManager(NEWBIE_ROLE_ID, MEMBER_ROLE_ID, NEWBIE_MAX_DURATION)
 	discord.AddHandler(newbiemanager.MemberRoleUpdateHandler)
-	_, err = cr.AddFunc(NEWBIE_FILTERING_CRON, func() {
+	_, err = cr.AddFunc(NEWBIE_REFRESHING_CRON, func() {
 		slog.Info("Refreshing newbie roles")
 		newbiemanager.RefreshNewbieRoles(discord)
 	})
