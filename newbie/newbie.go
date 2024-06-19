@@ -8,6 +8,7 @@ import (
 	"github.com/bwmarrin/discordgo"
 )
 
+// 新規会員マネージャ
 type NewbieManager interface {
 	// 会員ロール変化時に新規会員ロールを操作するハンドラ
 	MemberRoleUpdateHandler(s *discordgo.Session, m *discordgo.GuildMemberUpdate)
@@ -16,11 +17,15 @@ type NewbieManager interface {
 }
 
 type newbieManager struct {
+	// 新規会員ロールID
 	newbieRoleID   string
+	// 会員ロールID
 	memberRoleID   string
+	// 新規会員とみなす期間
 	newbieDuration time.Duration
 }
 
+// 新規会員マネージャを作成
 func NewNewbieManager(newbieRoleID, memberRoleID string, newbieDuration time.Duration) NewbieManager {
 	return &newbieManager{
 		newbieRoleID:   newbieRoleID,
