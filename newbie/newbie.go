@@ -30,7 +30,7 @@ func NewNewbieManager(newbieRoleID, memberRoleID string, newbieDuration time.Dur
 }
 
 // userが新規会員に該当するかどうか
-func (n *newbieManager) checkNewbie(s *discordgo.Session, member *discordgo.Member) (bool, error) {
+func (n *newbieManager) checkNewbie(member *discordgo.Member) (bool, error) {
 	age := time.Since(member.JoinedAt)
 	// 会員でない場合は新規会員ではない
 	if !slices.Contains(member.Roles, n.memberRoleID) {
@@ -43,7 +43,7 @@ func (n *newbieManager) checkNewbie(s *discordgo.Session, member *discordgo.Memb
 func (n *newbieManager) MemberRoleUpdateHandler(s *discordgo.Session, m *discordgo.GuildMemberUpdate) {
 	// 会員ロールが付与された時
 	if slices.Contains(m.Roles, n.memberRoleID) && (m.BeforeUpdate == nil || m.BeforeUpdate.Roles == nil || !slices.Contains(m.BeforeUpdate.Roles, n.memberRoleID)) {
-		isNewbie, err := n.checkNewbie(s, m.Member)
+		isNewbie, err := n.checkNewbie(m.Member)
 		if err == nil && isNewbie {
 			slog.Info("Add newbie role", "m.User.ID", m.User.ID)
 			s.GuildMemberRoleAdd(m.GuildID, m.User.ID, n.newbieRoleID)
@@ -51,7 +51,7 @@ func (n *newbieManager) MemberRoleUpdateHandler(s *discordgo.Session, m *discord
 	}
 	// 新規会員ロールが手動付与された時
 	if slices.Contains(m.Roles, n.newbieRoleID) && (m.BeforeUpdate == nil || m.BeforeUpdate.Roles == nil || !slices.Contains(m.BeforeUpdate.Roles, n.newbieRoleID)) {
-		isNewbie, err := n.checkNewbie(s, m.Member)
+		isNewbie, err := n.checkNewbie(m.Member)
 		if err == nil && !isNewbie {
 			// 条件にあてはまらない場合キャンセル
 			slog.Info("Refuse newbie role", "m.User.ID", m.User.ID)
@@ -78,7 +78,7 @@ func (n *newbieManager) FilterNewbieRoles(s *discordgo.Session) {
 				// 会員ロールと新規会員ロールを持っている場合
 				if slices.Contains(member.Roles, n.memberRoleID) && slices.Contains(member.Roles, n.newbieRoleID) {
 					// 新規会員でない場合は新規会員ロールを削除
-					isNewbie, err := n.checkNewbie(s, member)
+					isNewbie, err := n.checkNewbie(member)
 					if err == nil && !isNewbie {
 						slog.Info("Remove newbie role", "member.User.ID", member.User.ID)
 						err := s.GuildMemberRoleRemove(guild.ID, member.User.ID, n.newbieRoleID)
