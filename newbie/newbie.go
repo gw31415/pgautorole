@@ -42,7 +42,7 @@ func (n *newbieManager) checkNewbie(s *discordgo.Session, member *discordgo.Memb
 
 func (n *newbieManager) MemberRoleUpdateHandler(s *discordgo.Session, m *discordgo.GuildMemberUpdate) {
 	// 会員ロールが付与された時
-	if m.BeforeUpdate != nil && slices.Contains(m.Roles, n.memberRoleID) && (m.BeforeUpdate.Roles == nil || !slices.Contains(m.BeforeUpdate.Roles, n.memberRoleID)) {
+	if slices.Contains(m.Roles, n.memberRoleID) && (m.BeforeUpdate == nil || m.BeforeUpdate.Roles == nil || !slices.Contains(m.BeforeUpdate.Roles, n.memberRoleID)) {
 		isNewbie, err := n.checkNewbie(s, m.Member)
 		if err == nil && isNewbie {
 			slog.Info("Add newbie role", "m.User.ID", m.User.ID)
