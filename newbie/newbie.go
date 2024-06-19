@@ -8,16 +8,6 @@ import (
 	"github.com/bwmarrin/discordgo"
 )
 
-// スライスが指定した条件を満たす要素を持っているかどうか
-func slicesHas[T any](s []T, test func(T) bool) bool {
-	for _, v := range s {
-		if test(v) {
-			return true
-		}
-	}
-	return false
-}
-
 // 新規会員マネージャ
 type NewbieManager interface {
 	// 会員ロール変化時に新規会員ロールを操作するハンドラ
