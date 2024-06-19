@@ -77,6 +77,7 @@ func (n *newbieManager) MemberRoleUpdateHandler(s *discordgo.Session, m *discord
 	}
 }
 
+// 一度に取得するメンバー数
 const MEMBERS_PER_REQUEST = 1000
 
 func (n *newbieManager) RefreshNewbieRoles(s *discordgo.Session) {
