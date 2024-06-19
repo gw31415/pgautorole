@@ -71,7 +71,7 @@ func main() {
 	})
 
 	// NewbieManagerの設定
-	slog.Info("Setting up NewbieRoleManager", "MEMBER_ROLE_ID", MEMBER_ROLE_ID, "NEWBIE_ROLE_ID", NEWBIE_ROLE_ID, "NEWBIE_MAX_DURATION", NEWBIE_MAX_DURATION)
+	slog.Info("Setting up NewbieManager", "MEMBER_ROLE_ID", MEMBER_ROLE_ID, "NEWBIE_ROLE_ID", NEWBIE_ROLE_ID, "NEWBIE_MAX_DURATION", NEWBIE_MAX_DURATION)
 	newbiemanager := newbie.NewNewbieManager(GUILD_ID, NEWBIE_ROLE_ID, MEMBER_ROLE_ID, NEWBIE_MAX_DURATION)
 	discord.AddHandler(newbiemanager.MemberRoleUpdateHandler)
 	_, err = cr.AddFunc(NEWBIE_REFRESHING_CRON, func() {
