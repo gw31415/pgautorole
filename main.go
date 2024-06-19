@@ -14,7 +14,7 @@ import (
 
 var (
 	// デバッグモード
-	DEBUG_MODE = os.Getenv("DEBUG_MODE")
+	DEBUG_MODE = len(os.Getenv("DEBUG_MODE")) > 0
 
 	// Discordのトークン
 	DISCORD_TOKEN = os.Getenv("DISCORD_TOKEN")
@@ -32,7 +32,7 @@ var (
 )
 
 func main() {
-	if len(os.Getenv("DEBUG_MODE")) > 0 {
+	if DEBUG_MODE {
 		slog.SetLogLoggerLevel(slog.LevelDebug)
 		slog.Debug("Debug mode")
 	}
