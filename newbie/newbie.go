@@ -58,6 +58,11 @@ func (n *newbieManager) MemberRoleUpdateHandler(s *discordgo.Session, m *discord
 			s.GuildMemberRoleRemove(m.GuildID, m.User.ID, n.newbieRoleID)
 		}
 	}
+	// 会員ロールが剥奪され、新規会員ロールが存在する場合
+	if !slices.Contains(m.Roles, n.memberRoleID) && slices.Contains(m.Roles, n.newbieRoleID) {
+		slog.Info("Remove newbie role", "m.User.ID", m.User.ID)
+		s.GuildMemberRoleRemove(m.GuildID, m.User.ID, n.newbieRoleID)
+	}
 }
 
 const MEMBERS_PER_REQUEST = 1000
