@@ -13,14 +13,14 @@ type NewbieManager interface {
 	// 会員ロール変化時に新規会員ロールを操作するハンドラ
 	MemberRoleUpdateHandler(s *discordgo.Session, m *discordgo.GuildMemberUpdate)
 	// 新規会員ロールを持っているメンバーから新規会員ロールを削除
-	FilterNewbieRoles(s *discordgo.Session)
+	RefreshNewbieRoles(s *discordgo.Session)
 }
 
 type newbieManager struct {
 	// 新規会員ロールID
-	newbieRoleID   string
+	newbieRoleID string
 	// 会員ロールID
-	memberRoleID   string
+	memberRoleID string
 	// 新規会員とみなす期間
 	newbieDuration time.Duration
 }
@@ -36,13 +36,12 @@ func NewNewbieManager(newbieRoleID, memberRoleID string, newbieDuration time.Dur
 
 // userが新規会員に該当するかどうか
 func (n *newbieManager) checkNewbie(member *discordgo.Member) (bool, error) {
-	age := time.Since(member.JoinedAt)
 	// 会員でない場合は新規会員ではない
 	if !slices.Contains(member.Roles, n.memberRoleID) {
 		return false, nil
 	}
 	// JoinedAtからNEWBIE_DURAITON経っていない新規会員
-	return age < n.newbieDuration, nil
+	return time.Since(member.JoinedAt) < n.newbieDuration, nil
 }
 
 func (n *newbieManager) MemberRoleUpdateHandler(s *discordgo.Session, m *discordgo.GuildMemberUpdate) {
@@ -72,7 +71,7 @@ func (n *newbieManager) MemberRoleUpdateHandler(s *discordgo.Session, m *discord
 
 const MEMBERS_PER_REQUEST = 1000
 
-func (n *newbieManager) FilterNewbieRoles(s *discordgo.Session) {
+func (n *newbieManager) RefreshNewbieRoles(s *discordgo.Session) {
 	for _, guild := range s.State.Guilds {
 		after := ""
 		for {
@@ -85,11 +84,17 @@ func (n *newbieManager) FilterNewbieRoles(s *discordgo.Session) {
 
 			// 全メンバーに対して処理
 			for _, member := range m {
-				// 会員ロールと新規会員ロールを持っている場合
-				if slices.Contains(member.Roles, n.memberRoleID) && slices.Contains(member.Roles, n.newbieRoleID) {
-					// 新規会員でない場合は新規会員ロールを削除
-					isNewbie, err := n.checkNewbie(member)
-					if err == nil && !isNewbie {
+				isNewbie, err := n.checkNewbie(member)
+				if err == nil {
+					if isNewbie {
+						// 新規会員の場合は新規会員ロールを付与
+						slog.Info("Add newbie role", "member.User.ID", member.User.ID)
+						err := s.GuildMemberRoleAdd(guild.ID, member.User.ID, n.newbieRoleID)
+						if err != nil {
+							slog.Error("Failed to add newbie role", err)
+						}
+					} else if slices.Contains(member.Roles, n.newbieRoleID) {
+						// 新規会員でない新規会員ロールがいた場合は新規会員ロールを削除
 						slog.Info("Remove newbie role", "member.User.ID", member.User.ID)
 						err := s.GuildMemberRoleRemove(guild.ID, member.User.ID, n.newbieRoleID)
 						if err != nil {

@@ -57,8 +57,8 @@ func main() {
 	newbiemanager := newbie.NewNewbieManager(NEWBIE_ROLE_ID, MEMBER_ROLE_ID, NEWBIE_MAX_DURATION)
 	discord.AddHandler(newbiemanager.MemberRoleUpdateHandler)
 	_, err = cr.AddFunc(NEWBIE_FILTERING_CRON, func() {
-		slog.Info("Filtering newbie roles")
-		newbiemanager.FilterNewbieRoles(discord)
+		slog.Info("Refreshing newbie roles")
+		newbiemanager.RefreshNewbieRoles(discord)
 	})
 	if err != nil {
 		slog.Error("Error adding cron job:", err)
