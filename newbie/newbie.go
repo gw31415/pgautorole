@@ -8,6 +8,16 @@ import (
 	"github.com/bwmarrin/discordgo"
 )
 
+// スライスが指定した条件を満たす要素を持っているかどうか
+func slicesHas[T any](s []T, test func(T) bool) bool {
+	for _, v := range s {
+		if test(v) {
+			return true
+		}
+	}
+	return false
+}
+
 // 新規会員マネージャ
 type NewbieManager interface {
 	// 会員ロール変化時に新規会員ロールを操作するハンドラ
@@ -17,6 +27,8 @@ type NewbieManager interface {
 }
 
 type newbieManager struct {
+	// サーバーID
+	guildID string
 	// 新規会員ロールID
 	newbieRoleID string
 	// 会員ロールID
@@ -26,8 +38,9 @@ type newbieManager struct {
 }
 
 // 新規会員マネージャを作成
-func NewNewbieManager(newbieRoleID, memberRoleID string, newbieDuration time.Duration) NewbieManager {
+func NewNewbieManager(guildID, newbieRoleID, memberRoleID string, newbieDuration time.Duration) NewbieManager {
 	return &newbieManager{
+		guildID:        guildID,
 		newbieRoleID:   newbieRoleID,
 		memberRoleID:   memberRoleID,
 		newbieDuration: newbieDuration,
@@ -45,6 +58,11 @@ func (n *newbieManager) checkNewbie(member *discordgo.Member) (bool, error) {
 }
 
 func (n *newbieManager) MemberRoleUpdateHandler(s *discordgo.Session, m *discordgo.GuildMemberUpdate) {
+	// イベントが発生したサーバーが異なる場合は無視
+	if m.GuildID != n.guildID {
+		return
+	}
+
 	// 会員ロールが付与された時
 	if slices.Contains(m.Roles, n.memberRoleID) && (m.BeforeUpdate == nil || m.BeforeUpdate.Roles == nil || !slices.Contains(m.BeforeUpdate.Roles, n.memberRoleID)) {
 		isNewbie, err := n.checkNewbie(m.Member)
@@ -72,39 +90,44 @@ func (n *newbieManager) MemberRoleUpdateHandler(s *discordgo.Session, m *discord
 const MEMBERS_PER_REQUEST = 1000
 
 func (n *newbieManager) RefreshNewbieRoles(s *discordgo.Session) {
-	for _, guild := range s.State.Guilds {
-		after := ""
-		for {
-			// MEMBER_PER_REQUESTずつメンバーを取得
-			m, err := s.GuildMembers(guild.ID, after, MEMBERS_PER_REQUEST)
-			// メンバーが取得できなかった場合は終了
-			if err != nil || len(m) == 0 {
-				break
-			}
+	guildIsOnline := slicesHas(s.State.Guilds, func(g *discordgo.Guild) bool {
+		return g.ID == n.guildID
+	})
+	if !guildIsOnline {
+		return
+	}
 
-			// 全メンバーに対して処理
-			for _, member := range m {
-				isNewbie, err := n.checkNewbie(member)
-				if err == nil {
-					if isNewbie {
-						// 新規会員の場合は新規会員ロールを付与
-						slog.Info("Add newbie role", "member.User.ID", member.User.ID)
-						err := s.GuildMemberRoleAdd(guild.ID, member.User.ID, n.newbieRoleID)
-						if err != nil {
-							slog.Error("Failed to add newbie role", err)
-						}
-					} else if slices.Contains(member.Roles, n.newbieRoleID) {
-						// 新規会員でない新規会員ロールがいた場合は新規会員ロールを削除
-						slog.Info("Remove newbie role", "member.User.ID", member.User.ID)
-						err := s.GuildMemberRoleRemove(guild.ID, member.User.ID, n.newbieRoleID)
-						if err != nil {
-							slog.Error("Failed to remove newbie role", err)
-						}
+	after := ""
+	for {
+		// MEMBER_PER_REQUESTずつメンバーを取得
+		m, err := s.GuildMembers(n.guildID, after, MEMBERS_PER_REQUEST)
+		// メンバーが取得できなかった場合は終了
+		if err != nil || len(m) == 0 {
+			break
+		}
+
+		// 全メンバーに対して処理
+		for _, member := range m {
+			isNewbie, err := n.checkNewbie(member)
+			if err == nil {
+				if isNewbie {
+					// 新規会員の場合は新規会員ロールを付与
+					slog.Info("Add newbie role", "member.User.ID", member.User.ID)
+					err := s.GuildMemberRoleAdd(n.guildID, member.User.ID, n.newbieRoleID)
+					if err != nil {
+						slog.Error("Failed to add newbie role", err)
+					}
+				} else if slices.Contains(member.Roles, n.newbieRoleID) {
+					// 新規会員でない新規会員ロールがいた場合は新規会員ロールを削除
+					slog.Info("Remove newbie role", "member.User.ID", member.User.ID)
+					err := s.GuildMemberRoleRemove(n.guildID, member.User.ID, n.newbieRoleID)
+					if err != nil {
+						slog.Error("Failed to remove newbie role", err)
 					}
 				}
 			}
-
-			after = m[len(m)-1].User.ID
 		}
+
+		after = m[len(m)-1].User.ID
 	}
 }

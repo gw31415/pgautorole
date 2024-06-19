@@ -19,6 +19,8 @@ var (
 	// Discordのトークン
 	DISCORD_TOKEN = os.Getenv("DISCORD_TOKEN")
 
+	// DiscordサーバーID
+	GUILD_ID = os.Getenv("GUILD_ID")
 	// 一般会員のロールID
 	MEMBER_ROLE_ID = os.Getenv("MEMBER_ROLE_ID")
 	// 新規会員のロールID
@@ -41,7 +43,7 @@ func main() {
 		return
 	}
 
-	// Discordセッションの作成
+	// Discordセッションの初期化
 	discord, err := discordgo.New("Bot " + DISCORD_TOKEN)
 	if err != nil {
 		slog.Error("Error creating Discord session:", err)
@@ -52,9 +54,25 @@ func main() {
 	// cronの初期化
 	cr := cron.New()
 
-	// Setup NewbieRoleManager
+	// 対応外のサーバーから退出する設定
+	discord.AddHandler(func(s *discordgo.Session, m *discordgo.GuildCreate) {
+		if m.Guild.ID != GUILD_ID {
+			slog.Warn("Leaving guild", "GUILD_ID", m.Guild.ID)
+			s.GuildLeave(m.Guild.ID)
+		}
+	})
+	discord.AddHandler(func(s *discordgo.Session, m *discordgo.Ready) {
+		for _, guild := range m.Guilds {
+			if guild.ID != GUILD_ID {
+				slog.Warn("Leaving guild", "GUILD_ID", guild.ID)
+				s.GuildLeave(guild.ID)
+			}
+		}
+	})
+
+	// NewbieManagerの設定
 	slog.Info("Setting up NewbieRoleManager", "MEMBER_ROLE_ID", MEMBER_ROLE_ID, "NEWBIE_ROLE_ID", NEWBIE_ROLE_ID, "NEWBIE_MAX_DURATION", NEWBIE_MAX_DURATION)
-	newbiemanager := newbie.NewNewbieManager(NEWBIE_ROLE_ID, MEMBER_ROLE_ID, NEWBIE_MAX_DURATION)
+	newbiemanager := newbie.NewNewbieManager(GUILD_ID, NEWBIE_ROLE_ID, MEMBER_ROLE_ID, NEWBIE_MAX_DURATION)
 	discord.AddHandler(newbiemanager.MemberRoleUpdateHandler)
 	_, err = cr.AddFunc(NEWBIE_REFRESHING_CRON, func() {
 		slog.Info("Refreshing newbie roles")
@@ -65,7 +83,7 @@ func main() {
 		return
 	}
 
-	// Discordセッションのオープン
+	// Discordセッションの開始
 	slog.Info("Opening discord connection")
 	err = discord.Open()
 	if err != nil {
