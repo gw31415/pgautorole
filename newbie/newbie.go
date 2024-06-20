@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/bwmarrin/discordgo"
-	"github.com/gw31415/pgautorole/internal/utils"
 )
 
 // 新規会員マネージャ
@@ -82,7 +81,7 @@ func (n *newbieManager) MemberRoleUpdateHandler(s *discordgo.Session, m *discord
 const MEMBERS_PER_REQUEST = 1000
 
 func (n *newbieManager) RefreshNewbieRoles(s *discordgo.Session) {
-	guildIsOnline := utils.SlicesHas(s.State.Guilds, func(g *discordgo.Guild) bool {
+	guildIsOnline := slices.ContainsFunc(s.State.Guilds, func(g *discordgo.Guild) bool {
 		return g.ID == n.guildID
 	})
 	if !guildIsOnline {

@@ -1,15 +1,5 @@
 package utils
 
-// スライスが指定した条件を満たす要素を持っているかどうか
-func SlicesHas[T any](s []T, test func(T) bool) bool {
-	for _, v := range s {
-		if test(v) {
-			return true
-		}
-	}
-	return false
-}
-
 // スライスの要素を変換して新しいスライスを作成
 func SlicesMap[T any, U any](s []T, f func(T) U) []U {
 	var result []U
