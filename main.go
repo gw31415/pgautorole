@@ -50,7 +50,7 @@ func main() {
 		slog.Error("Error creating Discord session:", err)
 		return
 	}
-	discord.Identify.Intents = discordgo.IntentsGuildMembers
+	discord.Identify.Intents = discordgo.IntentsGuildMembers | discordgo.IntentsGuilds
 
 	// cronの初期化
 	cr := cron.New()
