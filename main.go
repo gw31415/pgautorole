@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/gw31415/pgautorole/course"
 	"github.com/gw31415/pgautorole/newbie"
 	"github.com/robfig/cron/v3"
 )
@@ -82,6 +83,16 @@ func main() {
 		slog.Error("Error adding cron job:", err)
 		return
 	}
+
+	// CourseManagerの設定
+	slog.Info("Setting up CourseManager")
+	coursemanager := course.NewCourseManager(GUILD_ID)
+	discord.AddHandler(coursemanager.ReadyHandler)
+	discord.AddHandler(coursemanager.GuildCreateHandler)
+	discord.AddHandler(coursemanager.GuildRoleCreateHandler)
+	discord.AddHandler(coursemanager.GulidRoleUpdateHandler)
+	discord.AddHandler(coursemanager.GuildRoleDeleteHandler)
+	discord.AddHandler(coursemanager.MemberRoleUpdateHandler)
 
 	// Discordセッションの開始
 	slog.Info("Opening discord connection")

@@ -1,1 +1,245 @@
 package course
+
+import (
+	"log/slog"
+	"slices"
+	"sync"
+
+	"github.com/bwmarrin/discordgo"
+	"github.com/gw31415/pgautorole/course/internal"
+	"github.com/gw31415/pgautorole/internal/utils"
+)
+
+// コースマネージャ
+type CourseManager interface {
+	// ロール情報を同期
+	ReadyHandler(s *discordgo.Session, u *discordgo.Ready)
+	// ロール情報を同期
+	GuildCreateHandler(s *discordgo.Session, u *discordgo.GuildCreate)
+	// ロール情報を同期
+	GuildRoleCreateHandler(s *discordgo.Session, u *discordgo.GuildRoleCreate)
+	// ロール情報を同期
+	GulidRoleUpdateHandler(s *discordgo.Session, u *discordgo.GuildRoleUpdate)
+	// ロール情報を同期
+	GuildRoleDeleteHandler(s *discordgo.Session, u *discordgo.GuildRoleDelete)
+	// ロール変更時にコース関連ロールを操作するハンドラ
+	MemberRoleUpdateHandler(s *discordgo.Session, m *discordgo.GuildMemberUpdate)
+}
+
+type courseManager struct {
+	rw             sync.RWMutex
+	cleaning       bool
+	guildID        string
+	roles          []*discordgo.Role
+	roleIDs        []string
+	levelCourseMap map[string]string
+}
+
+func NewCourseManager(guildID string) CourseManager {
+	return &courseManager{
+		guildID:  guildID,
+		cleaning: false,
+	}
+}
+
+// サーバーのロール情報を同期
+func (m *courseManager) syncRoles(s *discordgo.Session) {
+	m.rw.Lock()
+	defer m.rw.Unlock()
+
+	// ロールの取得
+	allroles, err := s.GuildRoles(m.guildID)
+	if err != nil {
+		slog.Error("failed to get roles:", err)
+		return
+	}
+
+	cids := []string{}
+	clids := []string{}
+	levelCourseMap := map[string]string{}
+
+r:
+	for _, r := range allroles {
+		c := internal.Course(r.Name)
+		clid := []string{}
+		for _, cl := range c.CourseLevels() {
+			name := cl.String()
+			clr := utils.SlicesFilter(allroles, func(r *discordgo.Role) bool {
+				return r.Name == name
+			})
+			if len(clr) != 1 {
+				continue r
+			}
+			clid = append(clid, clr[0].ID)
+		}
+		slog.Info("Course detected:", "COURSE_NAME", r.Name)
+		cids = append(cids, r.ID)
+		clids = append(clids, clid...)
+		for _, cl := range clid {
+			levelCourseMap[cl] = r.ID
+		}
+	}
+
+	m.roleIDs = []string{}
+	m.roleIDs = append(m.roleIDs, cids...)
+	m.roleIDs = append(m.roleIDs, clids...)
+
+	m.roles = utils.SlicesFilter(allroles, func(r *discordgo.Role) bool {
+		return slices.Contains(m.roleIDs, r.ID)
+	})
+
+	m.levelCourseMap = levelCourseMap
+}
+
+func (m *courseManager) getID(cl *internal.CourseLevel) string {
+	for _, r := range m.roles {
+		if r.Name == cl.String() {
+			return r.ID
+		}
+	}
+	return ""
+}
+func (m *courseManager) getCourse(id string) *internal.Course {
+	// TODO: Fix
+	if m.levelCourseMap[id] != "" {
+		return nil
+	}
+	for _, r := range m.roles {
+		if r.ID == id {
+			course := internal.Course(r.Name)
+			return &course
+		}
+	}
+	return nil
+}
+
+func (m *courseManager) ReadyHandler(s *discordgo.Session, u *discordgo.Ready) {
+	m.syncRoles(s)
+}
+func (m *courseManager) GuildCreateHandler(s *discordgo.Session, u *discordgo.GuildCreate) {
+	m.syncRoles(s)
+}
+func (m *courseManager) GuildRoleCreateHandler(s *discordgo.Session, u *discordgo.GuildRoleCreate) {
+	m.syncRoles(s)
+}
+func (m *courseManager) GulidRoleUpdateHandler(s *discordgo.Session, u *discordgo.GuildRoleUpdate) {
+	m.syncRoles(s)
+}
+func (m *courseManager) GuildRoleDeleteHandler(s *discordgo.Session, u *discordgo.GuildRoleDelete) {
+	m.syncRoles(s)
+}
+
+func (m *courseManager) MemberRoleUpdateHandler(s *discordgo.Session, u *discordgo.GuildMemberUpdate) {
+	m.rw.RLock()
+	defer m.rw.RUnlock()
+
+	// ロール変更前後のコース関連ロールを取得
+	roles := utils.SlicesFilter(u.Member.Roles, func(id string) bool {
+		return slices.Contains(m.roleIDs, id)
+	})
+
+	rolesBefore := []string{}
+	if u.BeforeUpdate != nil {
+		rolesBefore = utils.SlicesFilter(u.BeforeUpdate.Roles, func(id string) bool {
+			return slices.Contains(m.roleIDs, id)
+		})
+	}
+
+	// 追加されたロールと削除されたロールを取得
+	added := utils.SlicesFilter(roles, func(r string) bool {
+		return !slices.Contains(rolesBefore, r)
+	})
+	removed := utils.SlicesFilter(rolesBefore, func(r string) bool {
+		return !slices.Contains(roles, r)
+	})
+
+	for _, rid := range added {
+		wasCourse := false
+		cid := m.levelCourseMap[rid]
+		var clids []string
+		if cid == "" {
+			wasCourse = true
+			cid = rid
+		}
+
+		for v, i := range m.levelCourseMap {
+			if i == cid {
+				clids = append(clids, v)
+			}
+		}
+
+		cl := utils.SlicesFilter(u.Member.Roles, func(id string) bool {
+			return slices.Contains(clids, id)
+		})
+
+		if wasCourse {
+			// コースロールが追加された時
+
+			if len(cl) == 0 {
+				// コースレベルロールの初期値はアプレンティス
+				c := m.getCourse(cid)
+				initialCourseLevel := c.With(internal.Apprentice)
+				s.GuildMemberRoleAdd(u.GuildID, u.User.ID, m.getID(&initialCourseLevel))
+			} else {
+				// コースレベルロールが複数ある時はとりあえず1つにする
+				// 再度イベント発火するので、再帰的に処理される
+				s.GuildMemberRoleRemove(u.GuildID, u.User.ID, cl[0])
+			}
+
+		} else {
+			// 他のコースレベルロールを削除
+			idsToRemove := utils.SlicesFilter(u.Member.Roles, func(id string) bool {
+				if slices.Contains(u.Member.Roles, cid) && id == rid {
+					return false
+				}
+				return slices.Contains(clids, id)
+			})
+			if len(idsToRemove) > 0 {
+				// コースレベルロールが複数ある時はとりあえず1つにする
+				// 再度イベント発火するので、再帰的に処理される
+				s.GuildMemberRoleRemove(u.GuildID, u.User.ID, idsToRemove[0])
+			}
+		}
+	}
+	for _, rid := range removed {
+		wasCourse := false
+		cid := m.levelCourseMap[rid]
+		var clids []string
+		if cid == "" {
+			wasCourse = true
+			cid = rid
+		}
+
+		for v, i := range m.levelCourseMap {
+			if i == cid {
+				clids = append(clids, v)
+			}
+		}
+
+		if wasCourse {
+			// コースロールが削除された時
+			// 他のコースレベルロールを削除
+			idsToRemove := utils.SlicesFilter(u.Member.Roles, func(id string) bool {
+				return slices.Contains(clids, id)
+			})
+			for _, id := range idsToRemove {
+				s.GuildMemberRoleRemove(u.GuildID, u.User.ID, id)
+			}
+		} else {
+			// コースレベルロールが削除された時
+			if slices.Contains(u.Member.Roles, cid) {
+				cl := utils.SlicesFilter(u.Member.Roles, func(id string) bool {
+					return slices.Contains(clids, id)
+				})
+				if len(cl) == 0 {
+					// コースレベルロールが0になる時は復元する
+					s.GuildMemberRoleAdd(u.GuildID, u.User.ID, rid)
+				} else if len(cl) > 1 {
+					// コースレベルロールが複数ある時はとりあえず1つにする
+					// 再度イベント発火するので、再帰的に処理される
+					s.GuildMemberRoleRemove(u.GuildID, u.User.ID, cl[0])
+				}
+			}
+		}
+	}
+}
