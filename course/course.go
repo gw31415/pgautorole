@@ -27,18 +27,23 @@ type CourseManager interface {
 }
 
 type courseManager struct {
-	rw             sync.RWMutex
-	cleaning       bool
-	guildID        string
-	roles          []*discordgo.Role
-	roleIDs        []string
+	// roles, roleIDs, levelCourseMapを操作するためのロック
+	rw sync.RWMutex
+	// サーバーID
+	guildID string
+	// コース関連ロール情報
+	roles []*discordgo.Role
+	// コース関連ロールのID一覧
+	roleIDs []string
+	// コースレベルロールIDからコースロールIDのマップ
+	// キーとして存在すればコースレベルロールと判断する
 	levelCourseMap map[string]string
 }
 
+// コースマネージャを生成
 func NewCourseManager(guildID string) CourseManager {
 	return &courseManager{
-		guildID:  guildID,
-		cleaning: false,
+		guildID: guildID,
 	}
 }
 
@@ -54,14 +59,20 @@ func (m *courseManager) syncRoles(s *discordgo.Session) {
 		return
 	}
 
+	// コースロールのID
 	cids := []string{}
+	// コースレベルロールのID
 	clids := []string{}
+	// コースレベルロールIDからコースロールIDのマップ
 	levelCourseMap := map[string]string{}
 
+	// サーバー内全てのロールの内からコース関連ロールを抽出
 r:
 	for _, r := range allroles {
 		c := internal.Course(r.Name)
 		clid := []string{}
+		// 対応するコースレベルロールのIDを取得
+		// 過不足があればスキップ
 		for _, cl := range c.CourseLevels() {
 			name := cl.String()
 			clr := utils.SlicesFilter(allroles, func(r *discordgo.Role) bool {
@@ -72,6 +83,7 @@ r:
 			}
 			clid = append(clid, clr[0].ID)
 		}
+		// 対応するコースレベルロールが過不足なければコースとして登録
 		slog.Info("Course detected:", "COURSE_NAME", r.Name)
 		cids = append(cids, r.ID)
 		clids = append(clids, clid...)
