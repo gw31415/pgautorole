@@ -49,6 +49,7 @@ func NewCourseManager(guildID string) CourseManager {
 
 // サーバーのロール情報を同期
 func (m *courseManager) syncRoles(s *discordgo.Session) {
+	slog.Info("Syncing roles...")
 	m.rw.Lock()
 	defer m.rw.Unlock()
 
