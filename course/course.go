@@ -113,7 +113,6 @@ func (m *courseManager) getID(cl *internal.CourseLevel) string {
 	return ""
 }
 func (m *courseManager) getCourse(id string) *internal.Course {
-	// TODO: Fix
 	if m.levelCourseMap[id] != "" {
 		return nil
 	}
