@@ -24,6 +24,10 @@ type CourseManager interface {
 	GuildRoleDeleteHandler(s *discordgo.Session, u *discordgo.GuildRoleDelete)
 	// ロール変更時にコース関連ロールを操作するハンドラ
 	MemberRoleUpdateHandler(s *discordgo.Session, m *discordgo.GuildMemberUpdate)
+
+	// WARN: MemberRoleUpdateHandlerのハンドラを切って使わなければならない
+	// メンバーのコース関連ロールの競合状態をチェックし、更新可能なら更新する
+	UnsafeCheckCourseRoles(s *discordgo.Session)
 }
 
 type courseManager struct {
@@ -44,6 +48,60 @@ type courseManager struct {
 func NewCourseManager(guildID string) CourseManager {
 	return &courseManager{
 		guildID: guildID,
+	}
+}
+
+func (m *courseManager) UnsafeCheckCourseRoles(s *discordgo.Session) {
+	m.syncRoles(s)
+	m.rw.RLock()
+	defer m.rw.RUnlock()
+
+	slog.Info("Refreshing members' course roles...")
+	after := ""
+	for {
+		members, err := s.GuildMembers(m.guildID, after, 1000)
+		if err != nil || len(members) == 0 {
+			break
+		}
+		slog.Debug("Paging members", "COUNT", len(members))
+		for _, member := range members {
+			croles := utils.SlicesFilter(member.Roles, func(r string) bool {
+				return slices.Contains(m.roleIDs, r)
+			})
+			if len(croles) == 0 {
+				continue
+			}
+
+			for _, rid := range croles {
+				cid := m.levelCourseMap[rid]
+				if cid == "" {
+					cid = rid
+
+					clids := []string{}
+					for v, i := range m.levelCourseMap {
+						if i == cid {
+							clids = append(clids, v)
+						}
+					}
+
+					dups := utils.SlicesFilter(member.Roles, func(id string) bool {
+						return slices.Contains(clids, id)
+					})
+					if len(dups) > 1 {
+						course := m.getCourse(cid)
+						slog.Warn("Duplicated course level roles", "USER", member.User.ID, "USER_NAME", member.User.GlobalName, "COURSE", *course)
+					}
+				} else {
+					if !slices.Contains(member.Roles, cid) {
+						course := m.getCourse(cid)
+						slog.Debug("", "COURSE", course)
+						slog.Info("Adding missing course role", "USER", member.User.ID, "USER_NAME", member.User.GlobalName, "COURSE", *course)
+						s.GuildMemberRoleAdd(m.guildID, member.User.ID, cid)
+					}
+				}
+			}
+		}
+		after = members[len(members)-1].User.ID
 	}
 }
 
