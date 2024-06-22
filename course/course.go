@@ -40,8 +40,12 @@ type CourseID CourseRelatedRoleID
 type CourseLevelID CourseRelatedRoleID
 
 type courseManager struct {
+	// updatingUsersを操作するためのロック
+	usersSync sync.RWMutex
+	// ユーザー情報を更新中かどうか
+	updatingUsers map[string]bool
 	// roles, roleIDs, levelCourseMapを操作するためのロック
-	rw sync.RWMutex
+	guildsync sync.RWMutex
 	// サーバーID
 	guildID string
 	// コース関連ロール情報
@@ -88,14 +92,15 @@ func (m *courseManager) getSameCourseLevels(cid CourseID) (ids []CourseLevelID) 
 // コースマネージャを生成
 func NewCourseManager(guildID string) CourseManager {
 	return &courseManager{
-		guildID: guildID,
+		guildID:       guildID,
+		updatingUsers: make(map[string]bool),
 	}
 }
 
 func (m *courseManager) UnsafeCheckCourseRoles(s *discordgo.Session) {
 	m.syncRoles(s)
-	m.rw.RLock()
-	defer m.rw.RUnlock()
+	m.guildsync.RLock()
+	defer m.guildsync.RUnlock()
 
 	slog.Info("Refreshing members' course roles...")
 	after := ""
@@ -137,8 +142,8 @@ func (m *courseManager) UnsafeCheckCourseRoles(s *discordgo.Session) {
 // サーバーのロール情報を同期
 func (m *courseManager) syncRoles(s *discordgo.Session) {
 	slog.Info("Syncing roles...")
-	m.rw.Lock()
-	defer m.rw.Unlock()
+	m.guildsync.Lock()
+	defer m.guildsync.Unlock()
 
 	// ロールの取得
 	allroles, err := s.GuildRoles(m.guildID)
@@ -242,20 +247,40 @@ func FilterMemberRoles[T ~string](member *discordgo.Member, list []T) []T {
 }
 
 func (m *courseManager) MemberRoleUpdateHandler(s *discordgo.Session, u *discordgo.GuildMemberUpdate) {
-	m.rw.RLock()
-	defer m.rw.RUnlock()
+	m.guildsync.RLock()
+	defer m.guildsync.RUnlock()
+
+	// ユーザー更新中かどうか取得
+	m.usersSync.RLock()
+	updating := m.updatingUsers[u.User.ID]
+	m.usersSync.RUnlock()
+
+	if updating {
+		// 他のタスクで更新中のユーザーはスキップ
+		return
+	}
 
 	// ロール変更前後のコース関連ロールを取得
 	roles := m.filterCourseRelatedRoleIDs(u.Member.Roles)
 
-	rolesBefore := []CourseRelatedRoleID{}
-	if u.BeforeUpdate != nil {
-		rolesBefore = m.filterCourseRelatedRoleIDs(u.BeforeUpdate.Roles)
+	if u.BeforeUpdate == nil {
+		// return // TODO: ロール変更前の情報がない場合は追加ロールを正しく処理できない
 	}
+	rolesBefore := m.filterCourseRelatedRoleIDs(u.BeforeUpdate.Roles)
 
 	// 追加されたロールと削除されたロールを取得
-	added := utils.SlicesDifference(rolesBefore, roles)
-	removed := utils.SlicesDifference(roles, rolesBefore)
+	added := utils.SlicesDifference(roles, rolesBefore)
+	removed := utils.SlicesDifference(rolesBefore, roles)
+
+	// ユーザー更新中に設定
+	m.usersSync.Lock()
+	m.updatingUsers[u.User.ID] = true
+	m.usersSync.Unlock()
+	defer func() {
+		m.usersSync.Lock()
+		delete(m.updatingUsers, u.User.ID)
+		m.usersSync.Unlock()
+	}()
 
 	for _, id := range added {
 		switch id := m.classifyCourseRelatedID(id).(type) {
@@ -270,11 +295,13 @@ func (m *courseManager) MemberRoleUpdateHandler(s *discordgo.Session, u *discord
 				// コースレベルロールの初期値はアプレンティス
 				c := m.getCourse(course)
 				initialCourseLevel := c.With(internal.Apprentice)
+
 				s.GuildMemberRoleAdd(u.GuildID, u.User.ID, m.getID(&initialCourseLevel))
 			} else {
-				// コースレベルロールが複数ある時はとりあえず1つにする
-				// NOTE: 再度イベント発火するので、再帰的に処理される
-				s.GuildMemberRoleRemove(u.GuildID, u.User.ID, string(dups[0]))
+				// コースレベルロールが既にある時はとりあえず1つにする
+				for _, i := range dups[1:] {
+					s.GuildMemberRoleRemove(u.GuildID, u.User.ID, string(i))
+				}
 			}
 		case CourseLevelID:
 			// コースレベルロールが追加された時
@@ -286,9 +313,7 @@ func (m *courseManager) MemberRoleUpdateHandler(s *discordgo.Session, u *discord
 			// 他のコースレベルロールを削除
 			for _, i := range dups {
 				if i != id || !hasCourse {
-					s.GuildMemberRoleRemove(u.GuildID, u.User.ID, string(id))
-					// 再度イベント発火するので、再帰的に処理される
-					break
+					s.GuildMemberRoleRemove(u.GuildID, u.User.ID, string(i))
 				}
 			}
 		}
@@ -303,9 +328,10 @@ func (m *courseManager) MemberRoleUpdateHandler(s *discordgo.Session, u *discord
 			// hasCourse := slices.Contains(u.Member.Roles, string(course))
 
 			// 他のコースレベルロールを削除
-			// NOTE: 再度イベント発火するので、再帰的に処理される
 			if len(dups) > 0 {
-				s.GuildMemberRoleRemove(u.GuildID, u.User.ID, string(dups[0]))
+				for _, i := range dups {
+					s.GuildMemberRoleRemove(u.GuildID, u.User.ID, string(i))
+				}
 			}
 		case CourseLevelID:
 			// コースレベルロールが削除された時
@@ -317,11 +343,15 @@ func (m *courseManager) MemberRoleUpdateHandler(s *discordgo.Session, u *discord
 			if len(dups) == 0 && hasCourse {
 				// コースレベルロールが0になる時は復元する
 				s.GuildMemberRoleAdd(u.GuildID, u.User.ID, string(id))
-			} else if !hasCourse && len(dups) == 1 || len(dups) > 1 {
+			} else if len(dups) > 1 {
 				// コースレベルロールが複数ある時はとりあえず1つにする
 				// またはコースロールがない時は完全に削除する
-				// NOTE: 再度イベント発火するので、再帰的に処理される
-				s.GuildMemberRoleRemove(u.GuildID, u.User.ID, string(dups[0]))
+				for ii, i := range dups {
+					if ii == 0 || !hasCourse {
+						continue
+					}
+					s.GuildMemberRoleRemove(u.GuildID, u.User.ID, string(i))
+				}
 			}
 		}
 	}
