@@ -263,10 +263,13 @@ func (m *courseManager) MemberRoleUpdateHandler(s *discordgo.Session, u *discord
 	// ロール変更前後のコース関連ロールを取得
 	roles := m.filterCourseRelatedRoleIDs(u.Member.Roles)
 
-	if u.BeforeUpdate == nil {
-		// return // TODO: ロール変更前の情報がない場合は追加ロールを正しく処理できない
+	rolesBefore := []CourseRelatedRoleID{}
+	if u.BeforeUpdate != nil {
+		rolesBefore = m.filterCourseRelatedRoleIDs(u.BeforeUpdate.Roles)
 	}
-	rolesBefore := m.filterCourseRelatedRoleIDs(u.BeforeUpdate.Roles)
+	// } else {
+	// 	return // TODO: ロール変更前の情報がない場合は追加ロールを正しく処理できない
+	// }
 
 	// 追加されたロールと削除されたロールを取得
 	added := utils.SlicesDifference(roles, rolesBefore)
