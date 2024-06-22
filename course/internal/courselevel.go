@@ -28,12 +28,12 @@ var levels = []Level{
 }
 
 // コース
-type CourseName string
+type Course string
 
 // コース配下のコースレベルを取得
-func (c *CourseName) CourseLevelNames() []CourseLevelName {
-	return utils.SlicesMap(levels, func(l Level) CourseLevelName {
-		return CourseLevelName{
+func (c *Course) CourseLevels() []CourseLevel {
+	return utils.SlicesMap(levels, func(l Level) CourseLevel {
+		return CourseLevel{
 			Course: *c,
 			Level:  l,
 		}
@@ -41,25 +41,25 @@ func (c *CourseName) CourseLevelNames() []CourseLevelName {
 }
 
 // 指定したレベルのコースレベルを取得
-func (c *CourseName) With(level Level) CourseLevelName {
-	return CourseLevelName{
+func (c *Course) With(level Level) CourseLevel {
+	return CourseLevel{
 		Course: *c,
 		Level:  level,
 	}
 }
 
 // コースとレベルの組み合わせ
-type CourseLevelName struct {
-	Course CourseName
+type CourseLevel struct {
+	Course Course
 	Level  Level
 }
 
 // コースレベルのロール名からコースとレベルを取得
-func ParseCourseLevel(s string) *CourseLevelName {
+func ParseCourseLevel(s string) *CourseLevel {
 	for _, l := range levels {
 		if strings.HasSuffix(s, "-"+string(l)) {
-			return &CourseLevelName{
-				Course: CourseName(strings.TrimSuffix(s, "-"+string(l))),
+			return &CourseLevel{
+				Course: Course(strings.TrimSuffix(s, "-"+string(l))),
 				Level:  l,
 			}
 		}
@@ -68,6 +68,6 @@ func ParseCourseLevel(s string) *CourseLevelName {
 }
 
 // 対応するロール名を取得
-func (cl *CourseLevelName) String() string {
+func (cl *CourseLevel) String() string {
 	return string(cl.Course) + "-" + string(cl.Level)
 }
