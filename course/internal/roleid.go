@@ -2,90 +2,139 @@ package internal
 
 import (
 	"errors"
+	"slices"
 
 	"github.com/gw31415/pgautorole/internal/utils"
 )
 
-// コース関連ロールのID
-type CourseRelatedRoleID struct {
-	id string
+// ある瞬間のコース関連ロールIDの相互関係
+type RoleIDRepository interface {
+	// IDからコース関連ロールIDを取得
+	FindID(id string) CourseRelatedRoleID
+	// IDからコース関連ロールIDを抽出
+	FilterIDs(ids []string) []CourseRelatedRoleID
 }
-
-func (c CourseRelatedRoleID) String() string {
-	return c.id
-}
-
-// コースID
-type CourseRoleID struct{ CourseRelatedRoleID }
-
-// コースレベルロールID
-type CourseLevelRoleID struct{ CourseRelatedRoleID }
 
 // コース関連ロールIDの管理構造体
-type RoleIDRepository struct {
+type roleIDRepository struct {
 	// コースレベルロールIDからコースロールIDのマップ
 	// キーとして存在すればコースレベルロールと判断する
-	levelCourseMap map[CourseRelatedRoleID]*CourseRoleID
-	// コースIDからコースレベルロールIDのマップ
-	courseLevelMap map[CourseRelatedRoleID][]CourseLevelRoleID
+	levelCourseMap map[string]*CourseRoleID
+	// コースIDからIDのマップ
+	courseLevelMap map[string][]*CourseLevelRoleID
 }
 
 // コース関連ロールIDのマップからRoleIDRepositoryを生成
-func NewRoleIDRepository(c2lMap map[string][]string) (*RoleIDRepository, error) {
-	levelCourseMap := make(map[CourseRelatedRoleID]*CourseRoleID)
-	courseLevelMap := make(map[CourseRelatedRoleID][]CourseLevelRoleID)
+func NewRoleIDRepository(c2lMap map[string][]string) (RoleIDRepository, error) {
+	levelCourseMap := make(map[string]*CourseRoleID)
+	courseLevelMap := make(map[string][]*CourseLevelRoleID)
 	for cs, lls := range c2lMap {
-		c := CourseRelatedRoleID{id: cs}
-		if courseLevelMap[c] != nil || levelCourseMap[c] != nil {
+		c := courseRelatedRoleID{id: cs}
+		if courseLevelMap[c.id] != nil || levelCourseMap[c.id] != nil {
 			return nil, errors.New("Duplicated ID")
 		}
-		ll := []CourseLevelRoleID{}
+		ll := []*CourseLevelRoleID{}
 		for _, ls := range lls {
-			l := CourseRelatedRoleID{id: ls}
-			if levelCourseMap[l] != nil || levelCourseMap[c] != nil {
+			l := courseRelatedRoleID{id: ls}
+			if levelCourseMap[l.id] != nil || levelCourseMap[c.id] != nil {
 				return nil, errors.New("Duplicated ID")
 			}
-			ll = append(ll, CourseLevelRoleID{l})
-			levelCourseMap[l] = &CourseRoleID{c}
+			ll = append(ll, &CourseLevelRoleID{l})
+			levelCourseMap[l.id] = &CourseRoleID{c}
 		}
-		courseLevelMap[c] = ll
+		courseLevelMap[c.id] = ll
 	}
-	return &RoleIDRepository{
+	repo := roleIDRepository{
 		levelCourseMap,
 		courseLevelMap,
-	}, nil
-}
-
-// コース関連ロールならCourseRelatedRoleIDにパースし、そうでなければnilを返す
-func (m *RoleIDRepository) ParseCourseRelatedID(id string) *CourseRelatedRoleID {
-	rid := CourseRelatedRoleID{id}
-	if m.levelCourseMap[rid] != nil || m.courseLevelMap[rid] != nil {
-		return &rid
 	}
-	return nil
+
+	ids := []CourseRelatedRoleID{}
+	// 各コース関連ロールIDにRoleIDRepositoryを設定
+	for _, v := range repo.courseLevelMap {
+		for _, vv := range v {
+			vv.courseRelatedRoleID.repo = &repo
+			ids = append(ids, vv)
+		}
+	}
+	for _, v := range repo.levelCourseMap {
+		v.courseRelatedRoleID.repo = &repo
+		ids = append(ids, v)
+	}
+	return &repo, nil
 }
 
-// コースIDまたはコースレベルロールIDを分類する
-func (m *RoleIDRepository) ClassifyCourseRelatedID(id CourseRelatedRoleID) interface{} {
+// コース関連ロールならcourseRelatedRoleIDにパースし、そうでなければnilを返す
+func (m *roleIDRepository) FindID(id string) CourseRelatedRoleID {
 	if m.levelCourseMap[id] != nil {
-		return CourseLevelRoleID{id}
+		return &CourseLevelRoleID{courseRelatedRoleID{id, m}}
 	} else if m.courseLevelMap[id] != nil {
-		return CourseRoleID{id}
+		return &CourseRoleID{courseRelatedRoleID{id, m}}
 	}
 	return nil
 }
 
 // IDからコース関連IDを抜き出す
-func (m *RoleIDRepository) FilterCourseRelatedRoleIDs(ids []string) []CourseRelatedRoleID {
-	return utils.SlicesFilterMap(ids, m.ParseCourseRelatedID)
+func (m *roleIDRepository) FilterIDs(ids []string) []CourseRelatedRoleID {
+	arr := []CourseRelatedRoleID{}
+	for _, id := range ids {
+		if cr := m.FindID(id); cr != nil {
+			arr = append(arr, cr)
+		}
+	}
+	return arr
 }
 
-// コースIDからコースレベルロールIDを取得
-func (m *RoleIDRepository) GetSameCourseLevels(id CourseRoleID) (ids []CourseLevelRoleID) {
-	return m.courseLevelMap[id.CourseRelatedRoleID]
+// コース関連ロールID
+type CourseRelatedRoleID interface {
+	// IDを文字列で取得
+	String() string
+	// コース内のレベルを取得
+	GetCourseLevelIDs() []*CourseLevelRoleID
+	// 該当するコースを取得
+	GetCourseRoleID() *CourseRoleID
 }
 
-// コースレベルロールIDからコースIDを取得
-func (m *RoleIDRepository) GetCourseRoleID(id CourseLevelRoleID) CourseRoleID {
-	return *m.levelCourseMap[id.CourseRelatedRoleID]
+type courseRelatedRoleID struct {
+	id string
+	repo *roleIDRepository
+}
+
+func (c *courseRelatedRoleID) String() string {
+	return c.id
+}
+
+// コースID
+type CourseRoleID struct{ courseRelatedRoleID }
+
+func (c *CourseRoleID) GetCourseLevelIDs() []*CourseLevelRoleID {
+	return c.repo.courseLevelMap[c.id]
+}
+func (c *CourseRoleID) GetCourseRoleID() *CourseRoleID {
+	return c
+}
+
+// コースレベルロールID
+type CourseLevelRoleID struct{ courseRelatedRoleID }
+
+func (c *CourseLevelRoleID) GetCourseLevelIDs() []*CourseLevelRoleID {
+	course := c.GetCourseRoleID()
+	return course.GetCourseLevelIDs()
+}
+func (c *CourseLevelRoleID) GetCourseRoleID() *CourseRoleID {
+	return c.repo.levelCourseMap[c.id]
+}
+
+// コース関連ロールIDの比較
+func Equal(a CourseRelatedRoleID, b CourseRelatedRoleID) bool {
+	return a.String() == b.String()
+}
+
+// コース関連ロールIDのスライスの差分を取得
+func Difference(a []CourseRelatedRoleID, b []CourseRelatedRoleID) []CourseRelatedRoleID {
+	return utils.SlicesFilter(a, func(v CourseRelatedRoleID) bool {
+		return !slices.ContainsFunc(b, func(w CourseRelatedRoleID) bool {
+			return v.String() == w.String()
+		})
+	})
 }
