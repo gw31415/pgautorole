@@ -30,15 +30,6 @@ type CourseManager interface {
 	UnsafeCheckCourseRoles(s *discordgo.Session)
 }
 
-// コース関連ロールのID
-type CourseRelatedRoleID string
-
-// コースID
-type CourseID CourseRelatedRoleID
-
-// コースレベルロールID
-type CourseLevelID CourseRelatedRoleID
-
 type courseManager struct {
 	// updatingUsersを操作するためのロック
 	usersSync sync.RWMutex
@@ -48,45 +39,10 @@ type courseManager struct {
 	guildsync sync.RWMutex
 	// サーバーID
 	guildID string
-	// コース関連ロール情報
-	roles []*discordgo.Role
-	// コース関連ロールのID一覧
-	roleIDs []CourseRelatedRoleID
-	// コースレベルロールIDからコースロールIDのマップ
-	// キーとして存在すればコースレベルロールと判断する
-	levelCourseMap map[CourseLevelID]CourseID
-}
-
-// コース関連ロールならparseCourseRelatedIDにパースし、そうでなければnilを返す
-func (m *courseManager) parseCourseRelatedID(id string) *CourseRelatedRoleID {
-	if slices.Contains(m.roleIDs, (CourseRelatedRoleID)(id)) {
-		return (*CourseRelatedRoleID)(&id)
-	}
-	return nil
-}
-
-// コースIDまたはコースレベルロールIDを分類する
-func (m *courseManager) classifyCourseRelatedID(id CourseRelatedRoleID) interface{} {
-	if m.levelCourseMap[(CourseLevelID)(id)] != "" {
-		return CourseLevelID(id)
-	} else {
-		return CourseID(id)
-	}
-}
-
-// IDからコース関連IDを抜き出す
-func (m *courseManager) filterCourseRelatedRoleIDs(roles []string) []CourseRelatedRoleID {
-	return utils.SlicesFilterMap(roles, m.parseCourseRelatedID)
-}
-
-// コースIDからコースレベルロールIDを取得
-func (m *courseManager) getSameCourseLevels(cid CourseID) (ids []CourseLevelID) {
-	for v, i := range m.levelCourseMap {
-		if i == cid {
-			ids = append(ids, v)
-		}
-	}
-	return
+	// IDからロール情報へのマップ
+	roles map[string]*discordgo.Role
+	// コース関連ロールの情報
+	*internal.RoleIDRepository
 }
 
 // コースマネージャを生成
@@ -95,6 +51,28 @@ func NewCourseManager(guildID string) CourseManager {
 		guildID:       guildID,
 		updatingUsers: make(map[string]bool),
 	}
+}
+
+// ロール名からコースIDを逆検索
+func (m *courseManager) reverseNameToRoleID(cl *internal.CourseLevelName) string {
+	for _, r := range m.roles {
+		if r.Name == cl.String() {
+			return r.ID
+		}
+	}
+	return ""
+}
+
+// コース関連ロールIDからロールの表示名を取得
+func (m *courseManager) getCourseName(id interface{}) *internal.CourseName {
+	switch id := id.(type) {
+	case internal.CourseRoleID:
+		name := internal.CourseName(m.roles[id.String()].Name)
+		return &name
+	case internal.CourseLevelRoleID:
+		return m.getCourseName(m.GetCourseRoleID(id))
+	}
+	return nil
 }
 
 func (m *courseManager) UnsafeCheckCourseRoles(s *discordgo.Session) {
@@ -111,26 +89,26 @@ func (m *courseManager) UnsafeCheckCourseRoles(s *discordgo.Session) {
 		}
 		slog.Debug("Paging members", "COUNT", len(members))
 		for _, member := range members {
-			croles := m.filterCourseRelatedRoleIDs(member.Roles)
+			croles := m.FilterCourseRelatedRoleIDs(member.Roles)
 			if len(croles) == 0 {
 				continue
 			}
 
 			for _, id := range croles {
-				switch cid := m.classifyCourseRelatedID(id).(type) {
-				case CourseID:
-					clids := m.getSameCourseLevels(cid)
+				switch cid := m.ClassifyCourseRelatedID(id).(type) {
+				case internal.CourseRoleID:
+					clids := m.GetSameCourseLevels(cid)
 
 					dups := FilterMemberRoles(member, clids)
 					if len(dups) > 1 {
-						course := m.getCourse(cid)
-						slog.Warn("Duplicated course level roles", "USER", member.User.ID, "USER_NAME", member.User.GlobalName, "COURSE", *course)
+						cname := m.getCourseName(cid)
+						slog.Warn("Duplicated course level roles", "USER", member.User.ID, "USER_NAME", member.User.GlobalName, "COURSE", *cname)
 					}
-				case CourseLevelID:
-					if !slices.Contains(member.Roles, string(cid)) {
-						course := m.getCourse(cid)
-						slog.Info("Adding missing course role", "USER", member.User.ID, "USER_NAME", member.User.GlobalName, "COURSE", *course)
-						s.GuildMemberRoleAdd(m.guildID, member.User.ID, string(cid))
+				case internal.CourseLevelRoleID:
+					if !slices.Contains(member.Roles, cid.String()) {
+						cname := m.getCourseName(cid)
+						slog.Info("Adding missing course role", "USER", member.User.ID, "USER_NAME", member.User.GlobalName, "COURSE", *cname)
+						s.GuildMemberRoleAdd(m.guildID, member.User.ID, cid.String())
 					}
 				}
 			}
@@ -152,18 +130,15 @@ func (m *courseManager) syncRoles(s *discordgo.Session) {
 		return
 	}
 
-	// コースロールのID
-	cids := []CourseID{}
-	// コースレベルロールのID
-	clids := []CourseLevelID{}
+	roles := make(map[string]*discordgo.Role)
 	// コースレベルロールIDからコースロールIDのマップ
-	levelCourseMap := map[CourseLevelID]CourseID{}
+	c2lMap := make(map[string][]string)
 
 	// サーバー内全てのロールの内からコース関連ロールを抽出
 r:
 	for _, r := range allroles {
 		c := internal.CourseName(r.Name)
-		clid := []CourseLevelID{}
+		clid := []string{}
 		// 対応するコースレベルロールのIDを取得
 		// 過不足があればスキップ
 		for _, cl := range c.CourseLevelNames() {
@@ -174,54 +149,28 @@ r:
 			if len(clr) != 1 {
 				continue r
 			}
-			clid = append(clid, CourseLevelID(clr[0].ID))
+			clid = append(clid, clr[0].ID)
 		}
 		// 対応するコースレベルロールが過不足なければコースとして登録
-		slog.Info("Course detected:", "COURSE_NAME", r.Name)
-		cids = append(cids, CourseID(r.ID))
-		clids = append(clids, clid...)
-		for _, cl := range clid {
-			levelCourseMap[cl] = CourseID(r.ID)
+		slog.Info("Course detected:", "COURSE_NAME", c)
+		c2lMap[r.ID] = clid
+
+		roles[r.ID] = r
+		for _, id := range clid {
+			idx := slices.IndexFunc(allroles, func(r *discordgo.Role) bool {
+				return r.ID == id
+			})
+			roles[id] = allroles[idx]
 		}
 	}
 
-	m.roleIDs = []CourseRelatedRoleID{}
-	for _, id := range cids {
-		m.roleIDs = append(m.roleIDs, CourseRelatedRoleID(id))
+	repo, err := internal.NewRoleIDRepository(c2lMap)
+	if err != nil {
+		slog.Error("failed to create role id repository:", err)
+		return
 	}
-	for _, id := range clids {
-		m.roleIDs = append(m.roleIDs, CourseRelatedRoleID(id))
-	}
-
-	m.roles = utils.SlicesFilter(allroles, func(r *discordgo.Role) bool {
-		return slices.Contains(m.roleIDs, CourseRelatedRoleID(r.ID))
-	})
-
-	m.levelCourseMap = levelCourseMap
-}
-
-func (m *courseManager) getID(cl *internal.CourseLevelName) string {
-	for _, r := range m.roles {
-		if r.Name == cl.String() {
-			return r.ID
-		}
-	}
-	return ""
-}
-
-func (m *courseManager) getCourse(id interface{}) *internal.CourseName {
-	switch id := id.(type) {
-	case CourseID:
-		for _, r := range m.roles {
-			if r.ID == string(id) {
-				course := internal.CourseName(r.Name)
-				return &course
-			}
-		}
-	case CourseLevelID:
-		return m.getCourse(m.levelCourseMap[id])
-	}
-	return nil
+	m.RoleIDRepository = repo
+	m.roles = roles
 }
 
 func (m *courseManager) ReadyHandler(s *discordgo.Session, u *discordgo.Ready) {
@@ -240,9 +189,9 @@ func (m *courseManager) GuildRoleDeleteHandler(s *discordgo.Session, u *discordg
 	m.syncRoles(s)
 }
 
-func FilterMemberRoles[T ~string](member *discordgo.Member, list []T) []T {
-	return utils.SlicesFilter(list, func(id T) bool {
-		return slices.Contains(member.Roles, string(id))
+func FilterMemberRoles(member *discordgo.Member, list []internal.CourseLevelRoleID) []internal.CourseLevelRoleID {
+	return utils.SlicesFilter(list, func(id internal.CourseLevelRoleID) bool {
+		return slices.Contains(member.Roles, id.String())
 	})
 }
 
@@ -261,11 +210,11 @@ func (m *courseManager) MemberRoleUpdateHandler(s *discordgo.Session, u *discord
 	}
 
 	// ロール変更前後のコース関連ロールを取得
-	roles := m.filterCourseRelatedRoleIDs(u.Member.Roles)
+	roles := m.FilterCourseRelatedRoleIDs(u.Member.Roles)
 
-	rolesBefore := []CourseRelatedRoleID{}
+	rolesBefore := []internal.CourseRelatedRoleID{}
 	if u.BeforeUpdate != nil {
-		rolesBefore = m.filterCourseRelatedRoleIDs(u.BeforeUpdate.Roles)
+		rolesBefore = m.FilterCourseRelatedRoleIDs(u.BeforeUpdate.Roles)
 	}
 	// } else {
 	// 	return // TODO: ロール変更前の情報がない場合は追加ロールを正しく処理できない
@@ -286,66 +235,66 @@ func (m *courseManager) MemberRoleUpdateHandler(s *discordgo.Session, u *discord
 	}()
 
 	for _, id := range added {
-		switch id := m.classifyCourseRelatedID(id).(type) {
-		case CourseID:
+		switch id := m.ClassifyCourseRelatedID(id).(type) {
+		case internal.CourseRoleID:
 			// コースロールが追加された時
 			course := id
-			sameCourseLevels := m.getSameCourseLevels(id)
+			sameCourseLevels := m.GetSameCourseLevels(id)
 			dups := FilterMemberRoles(u.Member, sameCourseLevels)
-			// hasCourse := slices.Contains(u.Member.Roles, string(course))
+			// hasCourse := slices.Contains(u.Member.Roles, course.String())
 
 			if len(dups) == 0 {
 				// コースレベルロールの初期値はアプレンティス
-				c := m.getCourse(course)
-				initialCourseLevel := c.With(internal.Apprentice)
+				cname := m.getCourseName(course)
+				initialCourseLevel := cname.With(internal.Apprentice)
 
-				s.GuildMemberRoleAdd(u.GuildID, u.User.ID, m.getID(&initialCourseLevel))
+				s.GuildMemberRoleAdd(u.GuildID, u.User.ID, m.reverseNameToRoleID(&initialCourseLevel))
 			} else {
 				// コースレベルロールが既にある時はとりあえず1つにする
 				for _, i := range dups[1:] {
-					s.GuildMemberRoleRemove(u.GuildID, u.User.ID, string(i))
+					s.GuildMemberRoleRemove(u.GuildID, u.User.ID, i.String())
 				}
 			}
-		case CourseLevelID:
+		case internal.CourseLevelRoleID:
 			// コースレベルロールが追加された時
-			course := m.levelCourseMap[id]
-			sameCourseLevels := m.getSameCourseLevels(course)
+			course := m.GetCourseRoleID(id)
+			sameCourseLevels := m.GetSameCourseLevels(course)
 			dups := FilterMemberRoles(u.Member, sameCourseLevels)
-			hasCourse := slices.Contains(u.Member.Roles, string(course))
+			hasCourse := slices.Contains(u.Member.Roles, course.String())
 
 			// 他のコースレベルロールを削除
 			for _, i := range dups {
 				if i != id || !hasCourse {
-					s.GuildMemberRoleRemove(u.GuildID, u.User.ID, string(i))
+					s.GuildMemberRoleRemove(u.GuildID, u.User.ID, i.String())
 				}
 			}
 		}
 	}
 	for _, id := range removed {
-		switch id := m.classifyCourseRelatedID(id).(type) {
-		case CourseID:
+		switch id := m.ClassifyCourseRelatedID(id).(type) {
+		case internal.CourseRoleID:
 			// コースロールが削除された時
 			// course := id
-			sameCourseLevels := m.getSameCourseLevels(id)
+			sameCourseLevels := m.GetSameCourseLevels(id)
 			dups := FilterMemberRoles(u.Member, sameCourseLevels)
 			// hasCourse := slices.Contains(u.Member.Roles, string(course))
 
 			// 他のコースレベルロールを削除
 			if len(dups) > 0 {
 				for _, i := range dups {
-					s.GuildMemberRoleRemove(u.GuildID, u.User.ID, string(i))
+					s.GuildMemberRoleRemove(u.GuildID, u.User.ID, i.String())
 				}
 			}
-		case CourseLevelID:
+		case internal.CourseLevelRoleID:
 			// コースレベルロールが削除された時
-			course := m.levelCourseMap[id]
-			sameCourseLevels := m.getSameCourseLevels(course)
+			course := m.GetCourseRoleID(id)
+			sameCourseLevels := m.GetSameCourseLevels(course)
 			dups := FilterMemberRoles(u.Member, sameCourseLevels)
-			hasCourse := slices.Contains(u.Member.Roles, string(course))
+			hasCourse := slices.Contains(u.Member.Roles, course.String())
 
 			if len(dups) == 0 && hasCourse {
 				// コースレベルロールが0になる時は復元する
-				s.GuildMemberRoleAdd(u.GuildID, u.User.ID, string(id))
+				s.GuildMemberRoleAdd(u.GuildID, u.User.ID, id.String())
 			} else if len(dups) > 1 {
 				// コースレベルロールが複数ある時はとりあえず1つにする
 				// またはコースロールがない時は完全に削除する
@@ -353,7 +302,7 @@ func (m *courseManager) MemberRoleUpdateHandler(s *discordgo.Session, u *discord
 					if ii == 0 || !hasCourse {
 						continue
 					}
-					s.GuildMemberRoleRemove(u.GuildID, u.User.ID, string(i))
+					s.GuildMemberRoleRemove(u.GuildID, u.User.ID, i.String())
 				}
 			}
 		}
