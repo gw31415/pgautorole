@@ -89,20 +89,20 @@ func (m *courseManager) UnsafeCheckCourseRoles(s *discordgo.Session) {
 			}
 
 			for _, id := range croles {
-				switch cid := id.(type) {
+				switch id := id.(type) {
 				case *internal.CourseRoleID:
-					clids := cid.GetCourseLevelIDs()
+					clids := id.GetCourseLevelIDs()
 
 					dups := FilterMemberRoles(member, clids)
 					if len(dups) > 1 {
-						cname := m.getCourseName(cid)
+						cname := m.getCourseName(id)
 						slog.Warn("Duplicated course level roles", "USER", member.User.ID, "USER_NAME", member.User.GlobalName, "COURSE", *cname)
 					}
 				case *internal.CourseLevelRoleID:
-					if !slices.Contains(member.Roles, cid.String()) {
-						cname := m.getCourseName(cid)
+					if !slices.Contains(member.Roles, id.String()) {
+						cname := m.getCourseName(id)
 						slog.Info("Adding missing course role", "USER", member.User.ID, "USER_NAME", member.User.GlobalName, "COURSE", *cname)
-						s.GuildMemberRoleAdd(m.guildID, member.User.ID, cid.String())
+						s.GuildMemberRoleAdd(m.guildID, member.User.ID, id.String())
 					}
 				}
 			}
