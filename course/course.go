@@ -89,20 +89,20 @@ func (m *courseManager) UnsafeCheckCourseRoles(s *discordgo.Session) {
 			}
 
 			for _, id := range croles {
-				switch cid := id.(type) {
+				switch id := id.(type) {
 				case *internal.CourseRoleID:
-					clids := cid.GetCourseLevelIDs()
+					clids := id.GetCourseLevelIDs()
 
 					dups := FilterMemberRoles(member, clids)
 					if len(dups) > 1 {
-						cname := m.getCourseName(cid)
+						cname := m.getCourseName(id)
 						slog.Warn("Duplicated course level roles", "USER", member.User.ID, "USER_NAME", member.User.GlobalName, "COURSE", *cname)
 					}
 				case *internal.CourseLevelRoleID:
-					if !slices.Contains(member.Roles, cid.String()) {
-						cname := m.getCourseName(cid)
+					if !slices.Contains(member.Roles, id.String()) {
+						cname := m.getCourseName(id)
 						slog.Info("Adding missing course role", "USER", member.User.ID, "USER_NAME", member.User.GlobalName, "COURSE", *cname)
-						s.GuildMemberRoleAdd(m.guildID, member.User.ID, cid.String())
+						s.GuildMemberRoleAdd(m.guildID, member.User.ID, id.String())
 					}
 				}
 			}
@@ -203,20 +203,18 @@ func (m *courseManager) MemberRoleUpdateHandler(s *discordgo.Session, u *discord
 		return
 	}
 
-	// ロール変更前後のコース関連ロールを取得
-	roles := m.FilterIDs(u.Member.Roles)
-
-	rolesBefore := []internal.CourseRelatedRoleID{}
+	roles := u.Member.Roles
+	rolesBefore := []string{}
 	if u.BeforeUpdate != nil {
-		rolesBefore = m.FilterIDs(u.BeforeUpdate.Roles)
+		rolesBefore = u.BeforeUpdate.Roles
 	}
 	// } else {
 	// 	return // TODO: ロール変更前の情報がない場合は追加ロールを正しく処理できない
 	// }
 
-	// 追加されたロールと削除されたロールを取得
-	added := internal.Difference(roles, rolesBefore)
-	removed := internal.Difference(rolesBefore, roles)
+	// 追加されたロールと削除されたロールを取得し、コース関連ロールにフィルタリング
+	added := m.FilterIDs(utils.SlicesDifference(roles, rolesBefore))
+	removed := m.FilterIDs(utils.SlicesDifference(rolesBefore, roles))
 
 	// ユーザー更新中に設定
 	m.usersSync.Lock()

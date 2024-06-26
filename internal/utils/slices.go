@@ -1,5 +1,7 @@
 package utils
 
+import "slices"
+
 // スライスの要素を変換して新しいスライスを作成
 func SlicesMap[T any, U any](s []T, f func(T) U) []U {
 	var result []U
@@ -29,4 +31,18 @@ func SlicesFilter[T any](s []T, test func(T) bool) []T {
 		}
 	}
 	return result
+}
+
+// スライスの共通部分を取得
+func SlicesIntersect[T comparable](a []T, b []T) []T {
+	return SlicesFilter(a, func(v T) bool {
+		return slices.Contains(b, v)
+	})
+}
+
+// スライスの差分を取得
+func SlicesDifference[T comparable](a []T, b []T) []T {
+	return SlicesFilter(a, func(v T) bool {
+		return !slices.Contains(b, v)
+	})
 }

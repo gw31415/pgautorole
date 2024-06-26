@@ -2,9 +2,6 @@ package internal
 
 import (
 	"errors"
-	"slices"
-
-	"github.com/gw31415/pgautorole/internal/utils"
 )
 
 // ある瞬間のコース関連ロールIDの相互関係
@@ -96,7 +93,7 @@ type CourseRelatedRoleID interface {
 }
 
 type courseRelatedRoleID struct {
-	id string
+	id   string
 	repo *roleIDRepository
 }
 
@@ -128,13 +125,4 @@ func (c *CourseLevelRoleID) GetCourseRoleID() *CourseRoleID {
 // コース関連ロールIDの比較
 func Equal(a CourseRelatedRoleID, b CourseRelatedRoleID) bool {
 	return a.String() == b.String()
-}
-
-// コース関連ロールIDのスライスの差分を取得
-func Difference(a []CourseRelatedRoleID, b []CourseRelatedRoleID) []CourseRelatedRoleID {
-	return utils.SlicesFilter(a, func(v CourseRelatedRoleID) bool {
-		return !slices.ContainsFunc(b, func(w CourseRelatedRoleID) bool {
-			return v.String() == w.String()
-		})
-	})
 }
