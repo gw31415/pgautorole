@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/gw31415/pgautorole/internal/utils"
 )
 
 // 新規会員マネージャ
@@ -53,8 +54,21 @@ func (n *newbieManager) MemberRoleUpdateHandler(s *discordgo.Session, m *discord
 		return
 	}
 
+	roles := m.Member.Roles
+	rolesBefore := []string{}
+	if m.BeforeUpdate != nil {
+		rolesBefore = m.BeforeUpdate.Roles
+	}
+	// } else {
+	// 	return // TODO: ロール変更前の情報がない場合は追加ロールを正しく処理できない
+	// }
+
+	// 追加されたロールと削除されたロールを取得
+	added := utils.SlicesDifference(roles, rolesBefore)
+	// removed := utils.SlicesDifference(rolesBefore, roles)
+
 	// 会員ロールが付与された時
-	if slices.Contains(m.Roles, n.memberRoleID) && (m.BeforeUpdate == nil || m.BeforeUpdate.Roles == nil || !slices.Contains(m.BeforeUpdate.Roles, n.memberRoleID)) {
+	if slices.Contains(added, n.memberRoleID) {
 		isNewbie, err := n.checkNewbie(m.Member)
 		if err == nil && isNewbie {
 			slog.Info("Add newbie role", "m.User.ID", m.User.ID)
@@ -62,7 +76,7 @@ func (n *newbieManager) MemberRoleUpdateHandler(s *discordgo.Session, m *discord
 		}
 	}
 	// 新規会員ロールが手動付与された時
-	if slices.Contains(m.Roles, n.newbieRoleID) && (m.BeforeUpdate == nil || m.BeforeUpdate.Roles == nil || !slices.Contains(m.BeforeUpdate.Roles, n.newbieRoleID)) {
+	if slices.Contains(added, n.newbieRoleID) {
 		isNewbie, err := n.checkNewbie(m.Member)
 		if err == nil && !isNewbie {
 			// 条件にあてはまらない場合キャンセル
