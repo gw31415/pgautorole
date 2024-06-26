@@ -24,16 +24,19 @@ type newbieManager struct {
 	newbieRoleID string
 	// 会員ロールID
 	memberRoleID string
+	// 新規会員から外すロール(ホワイトリスト)
+	whiteRoleIDs []string
 	// 新規会員とみなす期間
 	newbieDuration time.Duration
 }
 
 // 新規会員マネージャを作成
-func NewNewbieManager(guildID, newbieRoleID, memberRoleID string, newbieDuration time.Duration) NewbieManager {
+func NewNewbieManager(guildID, newbieRoleID, memberRoleID string, whiteRoleIDs []string, newbieDuration time.Duration) NewbieManager {
 	return &newbieManager{
 		guildID:        guildID,
 		newbieRoleID:   newbieRoleID,
 		memberRoleID:   memberRoleID,
+		whiteRoleIDs:   whiteRoleIDs,
 		newbieDuration: newbieDuration,
 	}
 }
@@ -42,6 +45,10 @@ func NewNewbieManager(guildID, newbieRoleID, memberRoleID string, newbieDuration
 func (n *newbieManager) checkNewbie(member *discordgo.Member) (bool, error) {
 	// 会員でない場合は新規会員ではない
 	if !slices.Contains(member.Roles, n.memberRoleID) {
+		return false, nil
+	}
+	// ホワイトリストに含まれるロールを持っている場合は新規会員ではない
+	if len(utils.SlicesIntersect(member.Roles, n.whiteRoleIDs)) > 0 {
 		return false, nil
 	}
 	// JoinedAtからNEWBIE_DURAITON経っていない新規会員
@@ -65,7 +72,7 @@ func (n *newbieManager) MemberRoleUpdateHandler(s *discordgo.Session, m *discord
 
 	// 追加されたロールと削除されたロールを取得
 	added := utils.SlicesDifference(roles, rolesBefore)
-	// removed := utils.SlicesDifference(rolesBefore, roles)
+	removed := utils.SlicesDifference(rolesBefore, roles)
 
 	// 会員ロールが付与された時
 	if slices.Contains(added, n.memberRoleID) {
@@ -75,8 +82,8 @@ func (n *newbieManager) MemberRoleUpdateHandler(s *discordgo.Session, m *discord
 			s.GuildMemberRoleAdd(m.GuildID, m.User.ID, n.newbieRoleID)
 		}
 	}
-	// 新規会員ロールが手動付与された時
-	if slices.Contains(added, n.newbieRoleID) {
+	// 新規会員ロールまたはホワイトリストロールが付与された時
+	if slices.Contains(added, n.newbieRoleID) || len(utils.SlicesIntersect(added, n.whiteRoleIDs)) > 0 {
 		isNewbie, err := n.checkNewbie(m.Member)
 		if err == nil && !isNewbie {
 			// 条件にあてはまらない場合キャンセル
@@ -88,6 +95,15 @@ func (n *newbieManager) MemberRoleUpdateHandler(s *discordgo.Session, m *discord
 	if !slices.Contains(m.Roles, n.memberRoleID) && slices.Contains(m.Roles, n.newbieRoleID) {
 		slog.Info("Remove newbie role", "m.User.ID", m.User.ID)
 		s.GuildMemberRoleRemove(m.GuildID, m.User.ID, n.newbieRoleID)
+	}
+	// 新規会員ロールが剥奪された時またはホワイトリストロールが剥奪された時
+	if !slices.Contains(removed, n.newbieRoleID) || len(utils.SlicesIntersect(removed, n.whiteRoleIDs)) > 0 {
+		isNewbie, err := n.checkNewbie(m.Member)
+		if err == nil && isNewbie {
+			// 条件にあてはまる場合リストア
+			slog.Info("Restore newbie role", "m.User.ID", m.User.ID)
+			s.GuildMemberRoleAdd(m.GuildID, m.User.ID, n.newbieRoleID)
+		}
 	}
 }
 

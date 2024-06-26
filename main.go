@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -30,6 +31,8 @@ var (
 	NEWBIE_REFRESHING_CRON = os.Getenv("NEWBIE_REFRESHING_CRON")
 	// 新規会員のロールの有効期間
 	NEWBIE_MAX_DURATION, _ = time.ParseDuration(os.Getenv("NEWBIE_MAX_DURATION"))
+	// 新規会員から外すロール(ホワイトリスト)
+	NEWBIE_WHITE_ROLE_IDS = strings.Split(os.Getenv("NEWBIE_WHITE_ROLE_IDS"), ",")
 )
 
 func main() {
@@ -73,7 +76,7 @@ func main() {
 
 	// NewbieManagerの設定
 	slog.Info("Setting up NewbieManager", "MEMBER_ROLE_ID", MEMBER_ROLE_ID, "NEWBIE_ROLE_ID", NEWBIE_ROLE_ID, "NEWBIE_MAX_DURATION", NEWBIE_MAX_DURATION)
-	newbiemanager := newbie.NewNewbieManager(GUILD_ID, NEWBIE_ROLE_ID, MEMBER_ROLE_ID, NEWBIE_MAX_DURATION)
+	newbiemanager := newbie.NewNewbieManager(GUILD_ID, NEWBIE_ROLE_ID, MEMBER_ROLE_ID, NEWBIE_WHITE_ROLE_IDS, NEWBIE_MAX_DURATION)
 	discord.AddHandler(newbiemanager.MemberRoleUpdateHandler)
 	_, err = cr.AddFunc(NEWBIE_REFRESHING_CRON, func() {
 		slog.Info("Refreshing newbie roles")
