@@ -1,4 +1,4 @@
-module github.com/gw31415/guildilizedgobot
+// module
 
 go 1.22.4
 
