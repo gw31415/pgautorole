@@ -226,6 +226,7 @@ func (m *courseManager) MemberRoleUpdateHandler(s *discordgo.Session, u *discord
 		m.usersSync.Unlock()
 	}()
 
+	// 追加されたロール
 	for _, id := range added {
 		course := id.GetCourseRoleID()
 		levels := id.GetCourseLevelIDs()
@@ -234,6 +235,7 @@ func (m *courseManager) MemberRoleUpdateHandler(s *discordgo.Session, u *discord
 		switch id := id.(type) {
 		case *internal.CourseRoleID:
 			// コースロールが追加された時
+
 			if len(dups) == 0 {
 				// コースレベルロールの初期値はアプレンティス
 				cname := m.getCourseName(course)
@@ -247,6 +249,8 @@ func (m *courseManager) MemberRoleUpdateHandler(s *discordgo.Session, u *discord
 				}
 			}
 		case *internal.CourseLevelRoleID:
+			// コースレベルロールが追加された時
+
 			// 他のコースレベルロールを削除
 			for _, cl := range dups {
 				if !internal.Equal(cl, id) || !hasCourse {
@@ -255,6 +259,8 @@ func (m *courseManager) MemberRoleUpdateHandler(s *discordgo.Session, u *discord
 			}
 		}
 	}
+
+	// 削除されたロール
 	for _, id := range removed {
 		course := id.GetCourseRoleID()
 		levels := id.GetCourseLevelIDs()
